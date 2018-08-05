@@ -1,0 +1,214 @@
+---
+title: "Statistical inference with the GSS data"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(gridExtra)
+library(grid)
+```
+
+### Load data
+
+```{r load-data}
+load("gss.Rdata")
+```
+
+We consider General Social Survey sample of indicators gathered from contemporary American society. Of course it does not include entire population and as mentioned in FAQ section the mechanism of interviewing was sampled face-to-face, capi, or phone interview.
+
+"The vast majority of GSS data is obtained in face-to-face interviews. Computer-assisted personal interviewing (CAPI) began in the 2002 GSS. Under some conditions when it has proved difficult to arrange an in-person interview with a sampled respondent, GSS interviews may be conducted by telephone."
+
+
+## Part 1: Data
+
+The target population of the GSS is adults (18+) living in households in the United States. From 1975 to the 2002 GSS used full-probability sampling of households designed to give each household an equal probability of being included in the GSS. 
+
+Since households had equal probability of being selected for the poll I am assuming **random sampling** was used. Speaking of random assignment I did not find any evidences of experiment taken place and since interviewee's had not been placed into "treatment" or "control" groups for experiment **random assigment** is not our case.
+
+We have 57061 rows and 114 features in our data set. Lots of categorical data presented.
+
+
+## Part 2: Research question
+
+1) Interest is to see how immigrants in second generation compared with "freshers"
+Do those who were born in country but they parents were not have higher income range on average over those who were not born in country.
+
+Features:
+- born: Was R born in this country
+- parborn: Were RS parents born in this country
+- income06: Total family income
+
+
+Posting second question just in case we stuck or there will be data dead end with our first question.
+
+2) Do you like series ? Watching TV more than others do ? Like stories about wealthy women/men "hanging"" with numbers of girls/boys each day throughout the life. Does watching TV correlate with having a sex with someone other than spouse ?
+
+Features:
+- xmarsex: Sex with person other than spouse
+- tvhours: Hours per day watching TV
+- child: Number of children
+
+
+## Part 3: Exploratory data analysis
+
+Lets do univariate analysis in a first place and see single variable values and distributions.
+
+```{r fig.retina=2}
+ggplot(aes(born), data = gss) + geom_bar(stat = "count") + 
+  xlab("Born in US")
+```
+
+Here we are seeing that info is not provided almost in 10k rows, 43k born in country and ~4.5 are not.
+
+
+```{r}
+ggplot(aes(parborn), data = gss) + geom_bar(stat = "count")+
+  xlab("Parent born in US") + theme(axis.text.x = element_text(angle = 90))
+```
+
+As for parent feature there we are interested only in two factors Both and Either in US. In this feature as well nearly 9k rows provided without information. 
+
+Last feature to look into us income06.
+
+```{r}
+table(gss$income06)
+```
+Clearly most of respondent did not provide their income level but anyway we at least have data which represent different levels and we could bootstrap more values if needed. The weakest group there 4k-5k range where only 54 rows are shown. Lets filter out NA and Refused values to see how many salaries we have across two group(born/not born). Will it be enough to state anything.
+
+```{r}
+f_gss <- gss %>% filter(!is.na(income06) & (income06 != 'Refused'))
+```
+
+
+```{r}
+ggplot(aes(income06), data = f_gss) + geom_bar(stat = "count")+
+  xlab("Income level") + theme(axis.text.x = element_text(angle = 90))
+```
+
+
+Now we need to come up with two groups:
+
+a) born in country but parents were not
+b) not born in country but came somehow
+
+```{r}
+neither_in_us_parents <- f_gss %>% filter(parborn == 'Neither In U.S')
+not_in_country <- f_gss %>% filter(born == 'No')
+neither_in_us_parents$group <- 'born in US parents not from US'
+not_in_country$group <- 'born not in US'
+combined <- rbind(neither_in_us_parents, not_in_country)
+```
+
+Lets now look at average count within each salary group for both born in country and not.
+
+```{r fig.asp=0.5}
+ggplot(aes(x=income06,y=..count../sum(..count..), group=group, color=group), data = combined)+
+  geom_point(stat = 'count') +
+  geom_line(stat = 'count') +
+  geom_smooth(stat = 'count')+
+  xlab("Income level") +
+  ylab("Percents per group") +
+  theme(axis.text.x = element_text(angle = 90), legend.position = 'top')
+```
+
+We can conclude clear trend from the **sample** we made for analysis that is: 
+On average within almost all salaries ranges the ones who were born in US from parent who were immigrants have a bigger salaries over those who were not born in US.
+
+## Part 4: Inference
+
+In the picture above we have seen that almost in each group there was domination of those born in USA. So we will no not be looking into means within each group in our hypothesis framework but rather will use Chi-Square Independence test. We have two categorical variables (income level) and *born (in US and not in US) and our first step is to come up with results table but before lets set H0 and Ha hypothesis.
+
+Constraints and conditions: 
+
+a) Provided is house income and we not 100% sure that was not a contribution from other parties.
+b) We filtered out and left only those who agreed to reveal their incomes when others did not.
+c) n < 10%.
+d) each case contributes to one cell.
+e) each scenario has more than 5 cases.
+
+**Ho**: Salary levels do not vary by place where the one was born. Variables are independent.    
+**Ha**: Variables are dependent and whether you born in US or not makes impact on your further opportunities and income. 
+
+We have too many income levels lets combine them into 4 groups: 0-9.999, 10.0000-29.999, 30.000-89.999, 90+
+
+```{r}
+combined <- combined %>% select(parborn, born, income06, group)
+levels(combined$income06) = c(levels(combined$income06), "<10k", "10k-30k", "30k-90k", "90+")
+```
+
+
+```{r}
+combined$income06[combined$income06 %in% c("Under $1 000", 
+                                           "$1 000 To 2 999", 
+                                           "$3 000 To 3 999", 
+                                           "$4 000 To 4 999", 
+                                           "$5 000 To 5 999", 
+                                           "$6 000 To 6 999", 
+                                           "$7 000 To 7 999", 
+                                           "$8 000 To 9 999")] <- "<10k"
+
+combined$income06[combined$income06 %in% c("$10000 To 12499", 
+                                           "$12500 To 14999",
+                                           "$15000 To 17499", 
+                                           "$17500 To 19999",
+                                           "$20000 To 22499", 
+                                           "$22500 To 24999",
+                                           "$25000 To 29999")] <- "10k-30k"
+
+combined$income06[combined$income06 %in% c( "$30000 To 34999",
+                                            "$35000 To 39999", 
+                                            "$40000 To 49999",
+                                            "$50000 To 59999",
+                                            "$60000 To 74999",
+                                            "$75000 To $89999")] <- "30k-90k"
+
+combined$income06[combined$income06 %in% c(  "$90000 To $109999",
+                                             "$110000 To $129999",
+                                             "$130000 To $149999",
+                                             "$150000 Or Over")] <- "90+"
+combined$income06 <- factor(combined$income06)
+
+```
+
+
+```{r}
+not_us <- table(filter(combined, group == 'born in US parents not from US')$income06)
+```
+
+```{r}
+us <- table(filter(combined, group == 'born not in US')$income06)
+```
+
+```{r}
+tbl <- rbind(us, not_us)
+tbl <- cbind(tbl, rowSums(tbl))
+tbl <-rbind(tbl, colSums(tbl))
+tbl
+```
+
+Here is our final table where last row and column are totals and based on these totals we are going to calculate rates, and chi statistic.
+
+Overall rate of born not in US is 0.45 , add up each column and divide by total from both group, 1010/2230.
+For those in US 1220/2230 = 0.55.
+If our H0 is true values in both groups don't vary and overall rate should apply to each basket of income ranges. I going to skip calculation part as it involves a lot of manual manipulation. Basically idea is multiply existing values by rates and then subtract given numbers from observed ones in the table abovetable, get result squared and divide again by same given number. Than add up results and that is going to be our chi_square. In our case 2.19.
+
+```{r}
+born_in_us_rate <- (121+299+407+183) / 2230
+parent_not_in_us_rate <- (126 + 370+516+208)/2230
+chi_square <- 2.19
+df  = (2-1)*(4-1)
+pchisq(chi_square, df, lower.tail = FALSE)
+```
+
+Big p-value suggests to stay with Ho and we are failed to reject null hypothesis. This data provide convincing evidence that whether you parents were born in US or not given you are an immigrant it doesn't impact your salary level.

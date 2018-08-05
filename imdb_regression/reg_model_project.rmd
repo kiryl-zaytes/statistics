@@ -1,0 +1,216 @@
+---
+title: "Modeling and prediction for movies"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(gridExtra)
+c25 <- c("#E31A1C", # red
+                "#6A3D9A", # purple
+                "#FF7F00", # orange
+                "black","gold1",
+                "skyblue2","#FB9A99", # lt pink
+                "#CAB2D6", # lt purple
+                "gray70",
+                "maroon","orchid1","deeppink1")
+
+```
+
+### Load data
+```{r load-data}
+load("movies.Rdata")
+```
+
+## Part 1: Data
+
+The data set is comprised of 651 randomly sampled movies produced and released before 2016. Data gathered via public API from IMDB and Rotten Tomatoes web portals. Provided is random sample of movies. It is not a part of experiment and research and takes form of observation study (causality cannot be inferred). Both these resources involve "free will" procedure of leaving comments and ratings so data is not generalist. 
+
+```{r}
+  names(movies)
+```
+
+* * *
+
+## Part 2: Research question
+
+Audiences' marks tend to be not aligned with the ones came from critics. So we will be looking in data to find if there is an association between audience and critics scores. What does make movie great maybe it is pampas rating or name of director or maybe it's just based on critic's opinion.
+
+* * *
+
+## Part 3: Exploratory data analysis
+```{r}
+str(movies)
+```
+
+```{r}
+movies%>%summarize_all(funs(sum(is.na(.))/n()))
+```
+
+```{r warning=FALSE}
+ggplot(aes(thtr_rel_year), data=movies) + 
+  geom_bar(aes(fill=genre), stat = 'count') + 
+  scale_fill_manual(values = c25) + 
+  xlab("Year")
+```
+```{r}
+movies %>% filter(best_pic_win == 'yes') %>% group_by(genre) %>% summarise(n=n())
+```
+
+Who would have thought but drama appears to be most popular genre in data set and more than others this genre won Oscar.
+
+
+```{r warning=FALSE}
+
+
+score_by_genre <- movies %>% 
+  group_by(genre) %>% 
+  summarise(mn = mean(critics_score)) %>%
+  arrange(desc(mn))
+
+score_by_genre$genre <- factor(score_by_genre$genre, levels=score_by_genre$genre)
+
+ggplot(aes(x=genre, y=mn), data=score_by_genre) + 
+  geom_bar(stat='identity') + 
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+Average ratings from critics seem to be higher for Documentary and Musical genres.
+
+
+```{r}
+ggplot(aes(x=audience_score, y=critics_score, color=genre), data=movies) + 
+  geom_point(size=1.2)+ scale_color_manual(values = c25)+ 
+  geom_vline(aes(xintercept=mean(audience_score), color='red')) + 
+  geom_hline(aes(yintercept=mean(critics_score), color='red')) +
+  geom_abline(slope=1, linetype="dashed") + 
+  xlab("Audience scrore from rotten tomatoes") + 
+  ylab("Critics score")
+
+```
+
+Upper left quadrant depicts movies over scored by a critics but underestimated by audiences. Lower bottom - vise avers. Red lines are mean values for critics and audience marks. Dashed line shows perfect match of critics and audience ratings.
+
+Looking at upper right zone we could notice that Drama and Documentary presented more than others categories. Both these genres getting appreciated both by critics and audiences. Comedies don't get greatly appreciated by both groups on contrary documentary movies rarely given ratings below mean line.
+
+Looking ahead we are going two use at least two these features(genres and user scores) to predict given ratings from critics.
+
+
+```{r}
+ggplot(aes(x=imdb_rating*10, y=critics_score, color=genre), data=movies) + 
+  geom_point(size=1.2)+ scale_color_manual(values = c25)+ 
+  geom_vline(aes(xintercept=mean(audience_score), color='red')) + 
+  geom_hline(aes(yintercept=mean(critics_score), color='red')) +
+  geom_abline(slope=1, linetype="dashed") +
+  xlab("IMDB rating x10") + 
+  ylab("Critics score (rotten tomatoes)")
+```
+
+IMDB ratings show even better results since under and over estimated areas comprised of less dots. So likely we will have to include this feature as well or select one of them.
+
+
+```{r}
+movies %>% summarise(audience_mean = mean(audience_score), critics_mean = mean(critics_score), imdb_mean=mean(imdb_rating))
+```
+
+IMDB ratings given in a bit different form but we can easily multiple by 10 and see that mean even higher than mean from rotten tomatoes. We could calculate consolidated rating but for now lets keep it as is.
+
+* * *
+
+## Part 4: Modeling
+
+I am going to include all variables from above. Not so many numeric features are in the set and it does not seem to be a good move to include may others categorical options. I bet that actors1-5 and dates would bot improve our model since there are not so many movies given and if we expect actor makes any impact on ratings (which is true) he/she should be seen in many movies within on set which is not true. Dates also have no impact on rating. As we have seen for Oscar winning feature there were only 6 movies awarded and it is also not something we can rely on. We will be looking into R-squared and adjusted R-squared values to identify variables to stick with. Since we have here number of categorical values it is hard to rely on p-value method since you cant exclude 1 or 2 levels from categories.
+
+```{r}
+ratings_model <- lm(critics_score ~ audience_score + genre + mpaa_rating + imdb_rating, data=movies)
+summary(ratings_model)
+```
+So our first model yields good result with adjusted R-squared score 0.6021. Most of the features are significant predictors but there are some levels that are not but anyway we would keep them as part of model.
+Genre mean p-va : (0.685+0.464+0.1561+0.06+0.002+0.122+0.166+0.068+0.050+0.66)/10=0.24. One level is significant genreDrama(0.00175)
+mpaa_ratingPG-13  also significant so lets keep also.
+
+Lets try to see what else could be done to improve or simplify this model.
+
+```{r}
+imdb_rating <- ggplot(aes(imdb_rating), data=movies) + geom_bar()
+audience_rating <- ggplot(aes(audience_score), data=movies) + geom_bar()
+critics_rating <- ggplot(aes(critics_score), data=movies) + geom_bar()
+grid.arrange(imdb_rating, audience_rating, critics_rating)
+
+```
+
+IMDb highest rating is 9 and there are just 1 or two values. Same goes for audience score but when we have a look to critics score we would see very tall bar at 100 point. Values from critics in general are lower than others so we need to think whether we need both IMDb and audience rating or just one them or even combined.
+
+```{r}
+movies <- movies %>% mutate(new_score = (audience_score + (imdb_rating * 10)) /2 )
+summary(lm(critics_score ~ new_score + genre + mpaa_rating, data=movies))
+```
+I did combine two values and it did not give us any improvement in model coefficients. Lets stick with these features as separate. 
+Next step is try to remove some features to see variations in model.
+
+```{r}
+summary(lm(critics_score ~ audience_score + genre + mpaa_rating + imdb_rating, data=movies))
+summary(lm(critics_score ~ audience_score + imdb_rating, data=movies))
+```
+So our result for prediction of critic score is as follows: at absolute 0 point if it was rating given by audience critic score would be 54.23755 point less. Lets say for genre Drama with PG-13 formula would be: -54.23755 + 0.21*audience_score + 8.00089*1(drama) -10.70423*1(pg-13) + 15.27*rating
+In fact removing features from model did not improve it so we are going to keep them. Now it is time to check residuals.
+
+```{r}
+ggplot(data = ratings_model, aes(x = .resid)) +
+  geom_histogram(binwidth = 25) +
+  xlab("Residuals")
+```
+
+Residuals d=distribution looks almost perfectly normal.
+
+```{r}
+ggplot(data = ratings_model, aes(sample = .resid)) +
+  stat_qq()
+```
+
+```{r}
+ggplot(data = ratings_model, aes(x = .fitted, y = .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  xlab("Fitted values") +
+  ylab("Residuals")
+```
+
+1. The residuals appear to be randomly distributed around 0.
+2. Residuals are nearly normal.
+3. Symmetric
+
+* * *
+
+## Part 5: Prediction
+
+For prediction I picked up famous movie from 2016 "Manchester by the sea" from IMDB and Rotten tomatoes.
+Critics score for this movie from rotten tomatoes is 95.
+http://www.imdb.com/title/tt4034228/?ref_=ttfc_fc_tt
+https://www.rottentomatoes.com/m/manchester_by_the_sea
+
+```{r}
+new_movie <- data.frame(audience_score = 77, genre = "Drama", mpaa_rating="R", imdb_rating=7.8)
+predict(ratings_model, new_movie, interval = "prediction", level = 0.95)
+```
+
+The model predicts with 95% confidence, that a movie with genre is Drama, rating is R and given marks from audience of IMBD(7.8) and Rotten tomatoes (77) is expected to have critics rating between 46.63 and 116.81 scores.
+
+* * *
+
+## Part 6: Conclusion
+
+1. We have learnt that ratings came from critics are usually lower than from audience. Indeed there is correlation.
+2. There is big portion of movies where rating from audience and critics don't correlate at all.
+3. IMDB ratings compared to critics ones taken from rotten t. are aligned better than same from rotten.
+4. Comedy genre does rarely take marks above average from both critics and audience.
+5. To get more precise prediction we need more samples.
+6. Data is not random. Audience is not clear.
